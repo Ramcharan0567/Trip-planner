@@ -1,6 +1,6 @@
 <div align="center">
 
-# ✈️ WanderAI — Structured AI Trip Planner
+# ✈️ WanderAI — Structured AI Trip Planner & Travel Platform
 
 **A modern, stateful React web application that transforms free-form trip descriptions into structured, day-by-day itineraries that users can interactively edit, reorder, filter, and export.**
 
@@ -8,7 +8,7 @@
 [![Express](https://img.shields.io/badge/Express-4.21-000000?style=for-the-badge&logo=express&logoColor=white)](https://expressjs.com/)
 [![Vite](https://img.shields.io/badge/Vite-5.4-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev/)
 [![AI Providers](https://img.shields.io/badge/AI-Grok%20|%20Gemini%20|%20OpenAI-412991?style=for-the-badge&logo=openai&logoColor=white)](#-multi-provider-llm-architecture)
-[![License](https://img.shields.io/badge/License-MIT-green.style=for-the-badge)](#)
+[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](#)
 
 </div>
 
@@ -61,13 +61,27 @@ flowchart TD
 
 | Category | Feature | Description |
 | :--- | :--- | :--- |
+| 🔑 **Authentication** | **Email & Password Login** | Full-screen interactive login landing page with Sign In, account registration, guest mode, and persistent LocalStorage sessions. |
+| 🎨 **Appearance** | **5 Vibrant Themes** | Toggle between Aurora Light, Cyber Dark, Sunset Horizon, Emerald Oasis, and Royal Velvet directly from the top navigation bar. |
+| 📲 **Sharing** | **Mobile QR Code Share** | Minimalist Share Modal containing an instant-access QR Code mapped to your Wi-Fi network IP for testing directly on your mobile device. |
 | 🎯 **Prompt Intent** | **Dynamic Day Inference** | Automatically parses requested trip length (e.g., *"A 4-day Mexico City trip..."* ➔ generates **4 days**). |
 | 🔀 **Interactivity** | **Stop Reordering** | Instantly shift activity order (`↑` / `↓`) within any day card without wiping state. |
-| ✂️ **Customization** | **Stop Pruning** | Remove unwanted stops (`✕`) on the fly. |
+| ✂️ **Customization** | **Stop Pruning & Expanding** | Remove unwanted stops (`✕`) on the fly, add custom stops manually, or edit budget estimates. |
 | 🔍 **Filtering** | **Day & Category Filters** | Filter schedule view by specific Day (`Day 1` ... `Day N`) or Category (Food, Culture, Outdoor, etc.). |
-| 📋 **Exporting** | **1-Click Markdown Exporter** | Copies complete formatted Markdown itinerary directly to system clipboard. |
+| 📋 **Exporting** | **Multi-Format Exporter** | Export itineraries to styled Markdown text, Word Document (.docx), or print directly to PDF. |
 | 🛡️ **Failure Proof** | **Interactive Demo Fallback** | Catches rate limits (HTTP 429), auth failures, and corrupt responses, falling back to a full interactive demo mode. |
 | ⚡ **Performance** | **Race Condition Guard** | Uses `AbortController` and request IDs so older network calls never overwrite newer prompts. |
+
+---
+
+## 🎨 Design Systems & Themes
+
+The application includes 5 premium, high-contrast, fully responsive travel theme templates:
+- ☀️ **Aurora**: Clean glassmorphism white with royal blue gradients.
+- 🌌 **Cyber Dark**: OLED dark background with neon cyan/magenta glowing accents.
+- 🌅 **Sunset**: Warm golden-rose coral gradient template.
+- 🌿 **Emerald**: Tropical mint green and teal forest accents.
+- 💜 **Royal**: Deep cosmic velvet purple and magenta gradients.
 
 ---
 
@@ -97,8 +111,10 @@ Handling AI failure gracefully is what separates real-world AI features from bas
 git clone https://github.com/Ramcharan0567/Trip-planner.git
 cd Trip-planner
 
-# Install dependencies and start server + client
+# Install dependencies
 npm install
+
+# Start development client (network host enabled) & backend server
 npm start
 ```
 Open **[http://localhost:5173](http://localhost:5173)** in your browser.
@@ -110,18 +126,17 @@ Open **[http://localhost:5173](http://localhost:5173)** in your browser.
 Configure your preferred LLM provider in `.env`. Changes auto-reload on the next request!
 
 ```env
-# Choose active provider: grok, gemini, openai, or demo
-LLM_PROVIDER=grok
+# Choose active provider: gemini, grok, openai, or demo
+LLM_PROVIDER=gemini
+
+# --- GEMINI (Google AI Studio) ---
+GEMINI_API_KEY=AIzaSy...YOUR_KEY_HERE
+GEMINI_MODEL=gemini-3.5-flash
 
 # --- GROK (xAI) ---
 XAI_API_KEY=xai-YOUR_KEY_HERE
 GROK_MODEL=grok-2
 GROK_BASE_URL=https://api.x.ai/v1
-
-# --- GEMINI (Google AI Studio) ---
-GEMINI_API_KEY=AIzaSy...YOUR_KEY_HERE
-GEMINI_MODEL=gemini-3.5-flash-lite
-GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta
 
 # --- OPENAI ---
 OPENAI_API_KEY=sk-...YOUR_KEY_HERE
@@ -139,29 +154,17 @@ OPENAI_BASE_URL=https://api.openai.com/v1
 
 | Assessment Area | Weight | Implementation Details |
 | :--- | :---: | :--- |
-| **React Architecture** | **25%** | Built with functional components, hooks (`useState`, `useEffect`, `useRef`), and pure state transformers in `src/itinerary.js`. |
+| **React Architecture** | **25%** | Highly modular design with components split into individual files (`Navbar`, `ShareModal`, `LoginPage`, `TransportHub`, etc.). State flow managed via reactive hooks and helper utilities. |
 | **AI Data Handling** | **25%** | Express API proxy (`server/index.js`) protects keys, enforces system prompts, and normalizes model outputs. |
 | **Handling Bad Output** | **20%** | Resilient against malformed JSON, missing fields, rate limits (HTTP 429), and out-of-order responses. |
-| **UI/UX & Product Sense** | **15%** | Glassmorphic design with `Outfit` & `Plus Jakarta Sans` fonts, ambient glows, dynamic day counts, and Markdown export. |
-| **Communication** | **15%** | Complete setup docs, Mermaid architecture diagrams, AI usage disclosure, and code review readiness. |
+| **UI/UX & Product Sense** | **15%** | Premium 5-Theme Engine, high-contrast layouts, dynamic day counts, and Word/PDF export. |
+| **Communication** | **15%** | Complete setup docs, Mermaid architecture diagrams, AI usage disclosure, and clean commit history. |
 
 ---
 
 ## 🤖 AI Usage Disclosure
 
 AI coding assistants (Gemini / Claude) were used to scaffold boilerplate layout elements, styling tokens, and verify API schema parsing edge cases. All state management, dynamic day inference algorithms, failure mitigation fallbacks, and backend proxies were authored and tested specifically for this assignment.
-
----
-
-## ⚠️ Known Limitations & Future Scope
-
-- **Reorder Controls**: Uses explicit `↑` / `↓` buttons rather than drag-and-drop to guarantee touch reliability on mobile viewports.
-- **Session State**: Maintains itinerary state in React memory during session; future releases can integrate localStorage or Firestore persistence.
-
----
-
-## ⏱️ Time Spent
-**~4 hours** total (designing JSON contracts, building Express proxy router, implementing failure handling pipelines, and designing the React UI).
 
 ---
 
