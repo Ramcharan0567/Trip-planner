@@ -254,15 +254,76 @@ export default function App() {
     setTimeout(() => setCopied(false), 2000);
   }
 
-  function downloadDocument() {
+  function downloadWordDocument() {
     if (!plan) return;
-    const content = generateDocumentText();
-    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8;' });
+
+    let html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+<head>
+  <meta charset='utf-8'>
+  <title>${plan.tripTitle}</title>
+  <style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 30px; color: #0f172a; line-height: 1.6; }
+    h1 { color: #1e1b4b; font-size: 24pt; margin-bottom: 4px; }
+    .meta { color: #64748b; font-size: 11pt; margin-bottom: 20px; font-weight: 600; }
+    .summary { background: #f8fafc; border-left: 4px solid #4f46e5; padding: 14px 18px; margin-bottom: 24px; font-size: 11pt; color: #334155; }
+    .day-header { background: #4f46e5; color: #ffffff; padding: 8px 14px; font-size: 13pt; font-weight: bold; margin-top: 24px; margin-bottom: 8px; border-radius: 4px; }
+    .day-focus { color: #475569; font-style: italic; font-size: 10pt; margin-bottom: 12px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+    th { background: #f1f5f9; text-align: left; padding: 8px 10px; border: 1px solid #cbd5e1; font-size: 10pt; color: #334155; }
+    td { padding: 8px 10px; border: 1px solid #cbd5e1; vertical-align: top; font-size: 10pt; }
+    .badge { background: #e0e7ff; color: #3730a3; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 9pt; }
+    .notes { color: #64748b; font-size: 9pt; margin-top: 4px; font-style: italic; }
+  </style>
+</head>
+<body>
+  <h1>${plan.tripTitle}</h1>
+  <div class="meta">Destination: <strong>${plan.destination}</strong> | Duration: <strong>${plan.days.length} Days</strong> | Activities: <strong>${totalStops} Stops</strong></div>
+  <div class="summary"><strong>Overview:</strong> ${plan.summary}</div>
+`;
+
+    plan.days.forEach((day, i) => {
+      html += `
+  <div class="day-header">Day ${i + 1}: ${day.title}</div>
+  <div class="day-focus"><strong>Focus:</strong> ${day.focus} &bull; ${day.overview}</div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 15%;">Time</th>
+        <th style="width: 25%;">Activity</th>
+        <th style="width: 15%;">Category</th>
+        <th style="width: 45%;">Details</th>
+      </tr>
+    </thead>
+    <tbody>`;
+
+      day.stops.forEach((stop) => {
+        html += `
+      <tr>
+        <td><strong>${stop.time}</strong></td>
+        <td><strong>${stop.name}</strong></td>
+        <td><span class="badge">${stop.category}</span></td>
+        <td>
+          ${stop.description}
+          ${stop.notes ? `<div class="notes">Note: ${stop.notes}</div>` : ''}
+        </td>
+      </tr>`;
+      });
+
+      html += `
+    </tbody>
+  </table>`;
+    });
+
+    html += `
+</body>
+</html>`;
+
+    const blob = new Blob(['\ufeff' + html], { type: 'application/msword' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     const safeName = (plan.destination || 'Trip').replace(/[^a-z0-9]/gi, '_');
     link.setAttribute('href', url);
-    link.setAttribute('download', `${safeName}_Itinerary_Doc.md`);
+    link.setAttribute('download', `${safeName}_Itinerary.doc`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -441,10 +502,10 @@ export default function App() {
                       <button
                         type="button"
                         className="action-btn download-btn"
-                        onClick={downloadDocument}
-                        title="Download as Document File (.md)"
+                        onClick={downloadWordDocument}
+                        title="Download Microsoft Word Document (.doc)"
                       >
-                        📄 Download Document
+                        📝 Download Word Doc (.doc)
                       </button>
                       <button
                         type="button"
