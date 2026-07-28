@@ -215,6 +215,7 @@ async function generateWithGemini({ requestText, apiKey, model, baseUrl }) {
     ],
     generationConfig: {
       temperature: 0.7,
+      maxOutputTokens: 8192,
       responseMimeType: 'application/json'
     }
   };
@@ -310,12 +311,50 @@ function parsePossiblyWrappedJson(content) {
   const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
   const candidate = fenced ? fenced[1].trim() : trimmed;
   const firstBrace = candidate.indexOf('{');
-  const lastBrace = candidate.lastIndexOf('}');
-
-  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+  
+  if (firstBrace === -1) {
     throw new Error('The model response did not contain JSON.');
   }
 
-  const jsonText = candidate.slice(firstBrace, lastBrace + 1);
-  return JSON.parse(jsonText);
+  const lastBrace = candidate.lastIndexOf('}');
+  const jsonText = lastBrace > firstBrace ? candidate.slice(firstBrace, lastBrace + 1) : candidate.slice(firstBrace);
+
+  try {
+    return JSON.parse(jsonText);
+  } catch (initialError) {
+    try {
+      const repaired = repairTruncatedJson(jsonText);
+      return JSON.parse(repaired);
+    } catch {
+      throw initialError;
+    }
+  }
+}
+
+function repairTruncatedJson(str) {
+  let cleaned = str.trim();
+  cleaned = cleaned.replace(/,\s*"[^"]*"?\s*:?\s*[^,}\]]*$/, '');
+  cleaned = cleaned.replace(/,\s*$/, '');
+  
+  let openBraces = 0;
+  let openBracket = 0;
+  let inString = false;
+
+  for (let i = 0; i < cleaned.length; i++) {
+    const char = cleaned[i];
+    if (char === '"' && cleaned[i - 1] !== '\\') {
+      inString = !inString;
+    } else if (!inString) {
+      if (char === '{') openBraces++;
+      if (char === '}') openBraces--;
+      if (char === '[') openBracket++;
+      if (char === ']') openBracket--;
+    }
+  }
+
+  if (inString) cleaned += '"';
+  while (openBracket > 0) { cleaned += ']'; openBracket--; }
+  while (openBraces > 0) { cleaned += '}'; openBraces--; }
+
+  return cleaned;
 }
