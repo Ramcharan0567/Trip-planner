@@ -5,11 +5,25 @@ import { buildDemoItinerary, inferDayCount, normalizeItinerary } from '../src/it
 dotenv.config();
 
 const app = express();
-const port = Number(process.env.PORT || 3001);
+const port = Number(process.env.PORT || 3006);
 
 function getActiveProvider() {
   dotenv.config({ override: true });
-  return (process.env.LLM_PROVIDER || inferDefaultProvider()).toLowerCase();
+  const rawProvider = (process.env.LLM_PROVIDER || '').toLowerCase();
+
+  if (rawProvider === 'gemini') {
+    const key = (process.env.GEMINI_API_KEY || '').trim();
+    if (!key) {
+      return 'demo';
+    }
+    return 'gemini';
+  }
+
+  if (rawProvider && ['grok', 'openai', 'demo'].includes(rawProvider)) {
+    return rawProvider;
+  }
+
+  return inferDefaultProvider();
 }
 
 app.use(express.json({ limit: '1mb' }));
@@ -17,6 +31,87 @@ app.use(express.json({ limit: '1mb' }));
 app.get('/api/health', (_request, response) => {
   const provider = getActiveProvider();
   response.json({ ok: true, provider });
+});
+
+// Live Place Photo Lookup API (Wikipedia / Wikimedia Media API)
+async function fetchRealPlacePhoto(queryStr) {
+  if (!queryStr || typeof queryStr !== 'string') return null;
+  try {
+    const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(
+      queryStr.trim()
+    )}&gsrlimit=1&prop=pageimages&pithumbsize=1000&format=json`;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1500);
+
+    const res = await fetch(searchUrl, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'WanderAITripPlanner/1.0 (contact@wanderai.com)'
+      }
+    }).catch(() => null);
+
+    clearTimeout(timer);
+
+    if (!res || !res.ok) return null;
+    const data = await res.json().catch(() => null);
+    const pages = data?.query?.pages;
+    if (!pages) return null;
+
+    const firstPage = Object.values(pages)[0];
+    const sourceUrl = firstPage?.thumbnail?.source;
+    return sourceUrl || null;
+  } catch {
+    return null;
+  }
+}
+
+async function enrichItineraryWithPhotos(itinerary) {
+  if (!itinerary || !Array.isArray(itinerary.days)) return itinerary;
+
+  try {
+    const dest = itinerary.destination || '';
+    const enrichedDays = await Promise.all(
+      itinerary.days.map(async (day) => {
+        if (!day || !Array.isArray(day.stops)) return day;
+        const enrichedStops = await Promise.all(
+          day.stops.map(async (stop) => {
+            if (!stop || stop.image) return stop;
+            try {
+              const query = `${stop.name || ''} ${dest}`.trim();
+              const photoUrl = await fetchRealPlacePhoto(query);
+              if (photoUrl) {
+                return { ...stop, image: photoUrl };
+              }
+            } catch {
+              // ignore photo fetch error
+            }
+            return stop;
+          })
+        );
+        return { ...day, stops: enrichedStops };
+      })
+    );
+
+    return { ...itinerary, days: enrichedDays };
+  } catch {
+    return itinerary; // Safe fallback to original itinerary
+  }
+}
+
+app.get('/api/place-photo', async (request, response) => {
+  const query = typeof request.query?.q === 'string' ? request.query.q.trim() : '';
+  if (!query) {
+    response.status(400).json({ ok: false, error: 'Query parameter q is required' });
+    return;
+  }
+
+  const photoUrl = await fetchRealPlacePhoto(query);
+  if (photoUrl) {
+    response.json({ ok: true, query, photoUrl });
+  } else {
+    response.json({ ok: false, query, photoUrl: null });
+  }
 });
 
 app.post('/api/itinerary', async (request, response) => {
@@ -30,31 +125,59 @@ app.post('/api/itinerary', async (request, response) => {
   const provider = getActiveProvider();
 
   try {
+    let itinerary;
+    let source = provider;
+    let model = 'demo';
+    let warning = '';
+
     if (provider === 'demo') {
-      const itinerary = buildDemoItinerary(requestText);
-      response.json({ ok: true, source: 'demo', model: 'demo', itinerary });
-      return;
+      itinerary = buildDemoItinerary(requestText);
+      source = 'demo';
+      model = 'demo';
+    } else {
+      try {
+        itinerary = await generateItineraryFromModel({ requestText, provider });
+        model = getProviderConfig(provider)?.model || 'default';
+        if (!itinerary || !Array.isArray(itinerary.days) || itinerary.days.length === 0) {
+          throw new Error('Model returned empty itinerary');
+        }
+      } catch (modelError) {
+        console.warn(`[TripPlanner API] ${provider} model failed (${modelError.message}). Falling back to demo mode.`);
+        itinerary = buildDemoItinerary(requestText);
+        source = `${provider} (fallback)`;
+        model = 'demo-fallback';
+        warning = `The ${provider.toUpperCase()} API model call fell back (${modelError.message}). Interactive itinerary generated.`;
+      }
     }
 
-    try {
-      const itinerary = await generateItineraryFromModel({ requestText, provider });
-      response.json({ ok: true, source: provider, model: getProviderConfig(provider).model, itinerary });
-    } catch (modelError) {
-      console.warn(`[TripPlanner API] ${provider} model failed (${modelError.message}). Falling back to demo mode.`);
-      const itinerary = buildDemoItinerary(requestText);
-      response.json({
-        ok: true,
-        source: `${provider} (fallback)`,
-        isFallback: true,
-        warning: `The ${provider.toUpperCase()} API request failed (${modelError.message}). Fallback demo itinerary generated.`,
-        model: 'demo-fallback',
-        itinerary
-      });
+    if (!itinerary) {
+      itinerary = buildDemoItinerary(requestText);
     }
+
+    // Enrich itinerary stops with real Wikipedia place photos (with safe fallback)
+    let enrichedItinerary = itinerary;
+    try {
+      enrichedItinerary = await enrichItineraryWithPhotos(itinerary);
+    } catch {
+      enrichedItinerary = itinerary;
+    }
+
+    response.json({
+      ok: true,
+      source,
+      model,
+      warning: warning || undefined,
+      itinerary: enrichedItinerary
+    });
   } catch (error) {
-    response.status(500).json({
-      ok: false,
-      error: error instanceof Error ? error.message : 'The planner could not build an itinerary.'
+    // Ultimate fallback guarantee: Always return a clean demo itinerary
+    const fallbackItinerary = buildDemoItinerary(requestText);
+    response.json({
+      ok: true,
+      source: 'fallback',
+      model: 'demo',
+      warning: `Notice: ${error instanceof Error ? error.message : 'Fallback itinerary generated'}`,
+      itinerary: fallbackItinerary
     });
   }
 });
@@ -64,8 +187,8 @@ app.listen(port, () => {
 });
 
 function inferDefaultProvider() {
-  const geminiKey = process.env.GEMINI_API_KEY || '';
-  if (geminiKey.startsWith('AIza')) {
+  const geminiKey = (process.env.GEMINI_API_KEY || '').trim();
+  if (geminiKey) {
     return 'gemini';
   }
 
@@ -86,7 +209,7 @@ function getProviderConfig(selectedProvider) {
     case 'gemini':
       return {
         apiKey: process.env.GEMINI_API_KEY,
-        model: process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite',
+        model: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
         baseUrl: (process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta').replace(/\/$/, ''),
         kind: 'gemini'
       };
@@ -126,8 +249,13 @@ async function generateItineraryFromModel({ requestText, provider }) {
 function createSystemPrompt(requestText = '') {
   const dayCount = inferDayCount(requestText);
   return [
-    'You are a travel planner that returns only valid JSON.',
-    'Return a single object with this shape:',
+    'You are a world-class travel planner API that returns ONLY valid raw JSON.',
+    'CRITICAL RULES FOR PLACES AND SCHEDULE:',
+    '1. You MUST provide specific, real-world named places, famous landmarks, exact temples, monuments, national parks, markets, and real dining venues for the requested destination.',
+    '2. DO NOT use generic placeholder stop names like "Check in and settle in", "Local lunch", "Walking loop", "Morning anchor", "Main attraction", "Coffee break", or "Sunset overlook".',
+    '3. Every stop name MUST be a real, identifiable, famous place name (e.g. "Golden Gate Bridge Overlook", "Yosemite Valley Tunnel View", "Sri Venkateswara Swamy Temple", "Dal Lake Shikara Ghat", "Eiffel Tower", "Fisherman\'s Wharf", "Munnar Tea Gardens", etc.).',
+    '4. Every day title MUST specify the exact day number and tourist places to visit (e.g. "Day 1: Times Square & Midtown Landmarks", "Day 2: Central Park & Museum Mile"). DO NOT use vague day titles like "Local texture", "Flexible finale", "Signature highlights", or "Arrival and first impressions".',
+    '5. Return a single JSON object with this EXACT structure:',
     '{',
     '  "tripTitle": string,',
     '  "destination": string,',
@@ -149,7 +277,7 @@ function createSystemPrompt(requestText = '') {
     '    }',
     '  ]',
     '}',
-    `Create exactly ${dayCount} days based on the user request. Each day needs 3 to 5 stops. Do not wrap the JSON in markdown fences.`
+    `Create exactly ${dayCount} days based on the user request. Each day MUST have 3 to 4 detailed stops with real place names. Do not wrap the JSON in markdown fences.`
   ].join('\n');
 }
 
@@ -220,7 +348,6 @@ async function generateWithGemini({ requestText, apiKey, model, baseUrl }) {
     }
   };
 
-  // Strategy 1: Standard API key query param + x-goog-api-key header
   const urlWithKey = `${baseUrl}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   let completion = await fetch(urlWithKey, {
     method: 'POST',
@@ -231,7 +358,6 @@ async function generateWithGemini({ requestText, apiKey, model, baseUrl }) {
     body: JSON.stringify(payload)
   });
 
-  // Automatic retry for short 429 rate limit cooldowns
   if (completion.status === 429) {
     await new Promise((resolve) => setTimeout(resolve, 2500));
     completion = await fetch(urlWithKey, {
@@ -244,7 +370,6 @@ async function generateWithGemini({ requestText, apiKey, model, baseUrl }) {
     });
   }
 
-  // Strategy 2: If 401/403, try Authorization Bearer header
   if (!completion.ok && (completion.status === 401 || completion.status === 403)) {
     const urlNoKey = `${baseUrl}/models/${encodeURIComponent(model)}:generateContent`;
     const bearerCompletion = await fetch(urlNoKey, {

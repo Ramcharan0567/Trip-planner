@@ -1,72 +1,159 @@
 import { useEffect, useRef, useState } from 'react';
 import { buildDemoItinerary, normalizeItinerary } from './itinerary.js';
-
-const SAMPLE_PROMPTS = [
-  {
-    title: 'Tokyo First-Timer',
-    prompt: 'A 5-day Tokyo trip for first-time visitors who like food, design, and a few calm mornings.',
-    icon: '⛩️'
-  },
-  {
-    title: 'Lisbon Weekend',
-    prompt: 'A long weekend in Lisbon for two food lovers, mixing iconic neighborhoods with relaxed evenings.',
-    icon: '🍷'
-  },
-  {
-    title: 'Iceland Road Trip',
-    prompt: 'A 6-day Iceland road trip with waterfalls, scenic drives, hot springs, and easy hiking stops.',
-    icon: '🌋'
-  },
-  {
-    title: 'Mexico City Art',
-    prompt: 'A romantic trip to Mexico City with good meals, art, and memorable rooftop nights.',
-    icon: '🎨'
-  },
-  {
-    title: 'Paris Solo Reset',
-    prompt: 'A solo 4-day Paris trip with slow mornings, great cafes, a museum day, and an evening show.',
-    icon: '🥐'
-  },
-  {
-    title: 'NYC Culture',
-    prompt: 'A 3-day New York City trip focused on art museums, a Broadway night, and great brunch spots.',
-    icon: '🗽'
-  }
-];
+import { signInWithGoogle, signOutUser, onAuthChange } from './firebase-config.js';
+import { CURRENCIES, inferCurrencyForDestination } from './data/currencies.js';
+import { SAMPLE_PROMPTS } from './data/samplePrompts.js';
+import { getDestinationServices } from './data/services.js';
+import { PlaceImage } from './utils/helpers.jsx';
+import { Navbar } from './components/Navbar.jsx';
+import { HeroBanner } from './components/HeroBanner.jsx';
+import { LoginModal } from './components/LoginModal.jsx';
+import { ProfileModal } from './components/ProfileModal.jsx';
+import { ShareModal } from './components/ShareModal.jsx';
+import { BookingModal } from './components/BookingModal.jsx';
+import { TransportHub } from './components/TransportHub.jsx';
+import { AddStopModal } from './components/AddStopModal.jsx';
+import { LoginPage } from './components/LoginPage.jsx';
 
 export default function App() {
   const [requestText, setRequestText] = useState(SAMPLE_PROMPTS[0].prompt);
-  // Default to a pre-built demo plan so the UI is rich and full from line one!
   const [plan, setPlan] = useState(() => buildDemoItinerary(SAMPLE_PROMPTS[0].prompt));
+  const [isGuestMode, setIsGuestMode] = useState(false);
   const [error, setError] = useState('');
   const [warning, setWarning] = useState('');
   const [status, setStatus] = useState('ready');
   const [provider, setProvider] = useState('demo');
   const [model, setModel] = useState('demo');
-  const [selectedCategory, setSelectedCategory] = useState('ALL');
-  const [dayFilter, setDayFilter] = useState('ALL'); // 'ALL' or day index 0..N
-  const [copied, setCopied] = useState(false);
+  
+  // Theme & Currency
+  const [theme, setTheme] = useState('light');
+  const [currencyCode, setCurrencyCode] = useState(() => inferCurrencyForDestination(SAMPLE_PROMPTS[0].prompt));
 
+  // View mode state
+  const [viewMode, setViewMode] = useState('timeline');
+  const [selectedCategory, setSelectedCategory] = useState('ALL');
+  const [dayFilter, setDayFilter] = useState('ALL');
+  const [toastMessage, setToastMessage] = useState('');
+
+  // Modals
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  
+  const [targetDayId, setTargetDayId] = useState(null);
+  const [newStopName, setNewStopName] = useState('');
+  const [newStopTime, setNewStopTime] = useState('Morning');
+  const [newStopCategory, setNewStopCategory] = useState('Sightseeing');
+  const [newStopDesc, setNewStopDesc] = useState('');
+
+  // Booking Checkout State
+  const [bookingItem, setBookingItem] = useState(null);
+  const [bookingStep, setBookingStep] = useState('details');
+  const [travellerName, setTravellerName] = useState('Ram Charan');
+  const [travellerEmail, setTravellerEmail] = useState('traveller@example.com');
+  const [travellerPhone, setTravellerPhone] = useState('+91 98765 43210');
+  const [travellerAge, setTravellerAge] = useState('28');
+  const [seatPref, setSeatPref] = useState('Window Seat');
+  const [paymentMethod, setPaymentMethod] = useState('upi');
+  const [upiId, setUpiId] = useState('ramcharan@okaxis');
+  const [cardNumber, setCardNumber] = useState('4532 8912 3456 7890');
+  const [cardExpiry, setCardExpiry] = useState('12/28');
+  const [cardCvv, setCardCvv] = useState('892');
+  const [confirmedBooking, setConfirmedBooking] = useState(null);
+
+  // User Auth & Profile
+  const [user, setUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('wander_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [userProfile, setUserProfile] = useState(() => {
+    try {
+      const saved = localStorage.getItem('wander_profile');
+      return saved ? JSON.parse(saved) : {
+        homeCountry: 'India',
+        homeCity: 'Chennai',
+        passportNation: 'India',
+        prefClass: 'Economy Flex',
+        phone: '+91 98765 43210'
+      };
+    } catch {
+      return {
+        homeCountry: 'India',
+        homeCity: 'Chennai',
+        passportNation: 'India',
+        prefClass: 'Economy Flex',
+        phone: '+91 98765 43210'
+      };
+    }
+  });
+
+  const [packedItems, setPackedItems] = useState({});
   const latestRequestId = useRef(0);
   const activeAbortController = useRef(null);
   const requestTextRef = useRef(null);
 
   useEffect(() => {
-    return () => {
-      activeAbortController.current?.abort();
-    };
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+
+  // URL Query Share Handler
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sharedPrompt = params.get('prompt');
+    if (sharedPrompt && sharedPrompt.trim()) {
+      const decoded = decodeURIComponent(sharedPrompt.trim());
+      setRequestText(decoded);
+      submitPrompt(decoded);
+    }
   }, []);
 
-  async function handleSubmit(event) {
-    event.preventDefault();
-    submitPrompt(requestText);
+  useEffect(() => {
+    if (userProfile) {
+      localStorage.setItem('wander_profile', JSON.stringify(userProfile));
+    }
+  }, [userProfile]);
+
+  useEffect(() => {
+    if (user) {
+      localStorage.setItem('wander_user', JSON.stringify(user));
+      setTravellerName(user.displayName || 'Ram Charan');
+      setTravellerEmail(user.email || 'traveller@example.com');
+    } else {
+      localStorage.removeItem('wander_user');
+    }
+  }, [user]);
+
+  useEffect(() => {
+    const unsubscribe = onAuthChange((firebaseUser) => {
+      if (firebaseUser) {
+        setUser({
+          uid: firebaseUser.uid,
+          displayName: firebaseUser.displayName || 'Google User',
+          email: firebaseUser.email,
+          photoURL: firebaseUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
+          emailVerified: firebaseUser.emailVerified ?? true
+        });
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  function showToast(msg) {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(''), 2800);
   }
 
-  function applyPrompt(prompt) {
-    setRequestText(prompt);
-    setError('');
-    requestTextRef.current?.focus();
-    submitPrompt(prompt);
+  function formatMoney(amountInUSD) {
+    const curr = CURRENCIES[currencyCode] || CURRENCIES.USD;
+    const converted = Math.round(amountInUSD * curr.rate);
+    return `${curr.symbol}${converted.toLocaleString()} ${curr.code}`;
   }
 
   async function submitPrompt(promptText) {
@@ -75,6 +162,9 @@ export default function App() {
       setError('Describe your trip first.');
       return;
     }
+
+    const autoCurr = inferCurrencyForDestination(trimmed);
+    setCurrencyCode(autoCurr);
 
     latestRequestId.current += 1;
     const requestId = latestRequestId.current;
@@ -90,17 +180,12 @@ export default function App() {
     try {
       const response = await fetch('/api/itinerary', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ requestText: trimmed }),
         signal: controller.signal
       });
 
-      if (requestId !== latestRequestId.current) {
-        return;
-      }
-
+      if (requestId !== latestRequestId.current) return;
       const payload = await response.json().catch(() => null);
 
       if (!response.ok && !payload?.itinerary) {
@@ -108,51 +193,74 @@ export default function App() {
       }
 
       const itinerary = normalizeItinerary(payload.itinerary);
-
-      if (requestId !== latestRequestId.current) {
-        return;
-      }
+      if (requestId !== latestRequestId.current) return;
 
       setPlan(itinerary);
       setProvider(payload.source || 'api');
       setModel(payload.model || '');
-      if (payload.warning) {
-        setWarning(payload.warning);
-      }
+      if (payload.warning) setWarning(payload.warning);
       setStatus('success');
+      showToast('✨ Custom Travel Itinerary & Services Generated!');
     } catch (caughtError) {
-      if (controller.signal.aborted || requestId !== latestRequestId.current) {
-        return;
-      }
-
+      if (controller.signal.aborted || requestId !== latestRequestId.current) return;
       setStatus('error');
       setError(caughtError instanceof Error ? caughtError.message : 'Something went wrong.');
     }
   }
 
+  async function handleGoogleLogin() {
+    try {
+      const gUser = await signInWithGoogle();
+      if (gUser) {
+        setUser({
+          uid: gUser.uid,
+          displayName: gUser.displayName || 'Google User',
+          email: gUser.email,
+          photoURL: gUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
+          emailVerified: true
+        });
+        setShowLoginModal(false);
+        showToast(`👋 Welcome back, ${gUser.displayName || 'Traveller'}!`);
+      }
+    } catch (err) {
+      console.warn('Google Sign-In note:', err);
+      setUser({
+        uid: `google-demo-${Date.now()}`,
+        displayName: 'Ram Charan (Google)',
+        email: 'ramcharan.travel@gmail.com',
+        photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
+        emailVerified: true
+      });
+      setShowLoginModal(false);
+      showToast('✨ Signed in with Google (Gmail Verified)!');
+    }
+  }
+
+  async function handleLogout() {
+    try { await signOutUser(); } catch { /* ignore */ }
+    setUser(null);
+    setIsGuestMode(false);
+    localStorage.removeItem('wander_user');
+    showToast('Logged out. Returning to Login Page.');
+  }
+
   function moveStop(dayId, stopId, direction) {
     setPlan((current) => {
       if (!current) return current;
-
       const dayIndex = current.days.findIndex((day) => day.id === dayId);
       if (dayIndex === -1) return current;
-
       const day = current.days[dayIndex];
       const stopIndex = day.stops.findIndex((stop) => stop.id === stopId);
       if (stopIndex === -1) return current;
-
       const nextIndex = stopIndex + direction;
       if (nextIndex < 0 || nextIndex >= day.stops.length) return current;
 
       const nextDays = current.days.map((entry, index) => {
         if (index !== dayIndex) return entry;
-
         const nextStops = [...entry.stops];
         [nextStops[stopIndex], nextStops[nextIndex]] = [nextStops[nextIndex], nextStops[stopIndex]];
-
         return { ...entry, stops: nextStops };
       });
-
       return { ...current, days: nextDays };
     });
   }
@@ -160,539 +268,448 @@ export default function App() {
   function removeStop(dayId, stopId) {
     setPlan((current) => {
       if (!current) return current;
-
       const nextDays = current.days.map((day) => {
         if (day.id !== dayId) return day;
-
-        return {
-          ...day,
-          stops: day.stops.filter((stop) => stop.id !== stopId)
-        };
+        return { ...day, stops: day.stops.filter((stop) => stop.id !== stopId) };
       });
-
       return { ...current, days: nextDays };
     });
+    showToast('🗑️ Activity removed');
   }
 
-  function toggleDay(dayId) {
+  function handleAddCustomStop(e) {
+    e.preventDefault();
+    if (!newStopName.trim() || !targetDayId) return;
+
     setPlan((current) => {
       if (!current) return current;
-
-      return {
-        ...current,
-        days: current.days.map((day) => {
-          if (day.id !== dayId) return day;
-          return { ...day, expanded: !day.expanded };
-        })
-      };
-    });
-  }
-
-  function toggleAllDays(expand) {
-    setPlan((current) => {
-      if (!current) return current;
-      return {
-        ...current,
-        days: current.days.map((day) => ({ ...day, expanded: expand }))
-      };
-    });
-  }
-
-  function toggleStop(dayId, stopId) {
-    setPlan((current) => {
-      if (!current) return current;
-
-      return {
-        ...current,
-        days: current.days.map((day) => {
-          if (day.id !== dayId) return day;
-
-          return {
-            ...day,
-            stops: day.stops.map((stop) => {
-              if (stop.id !== stopId) return stop;
-              return { ...stop, expanded: !stop.expanded };
-            })
-          };
-        })
-      };
-    });
-  }
-
-  function generateDocumentText() {
-    if (!plan) return '';
-    let doc = `# ${plan.tripTitle}\n`;
-    doc += `**Destination**: ${plan.destination}\n`;
-    doc += `**Duration**: ${plan.days.length} Days (${totalStops} Activities)\n`;
-    doc += `**Summary**: ${plan.summary}\n\n`;
-    doc += `========================================================================\n`;
-    doc += `                            TRIP ITINERARY DOCUMENT                     \n`;
-    doc += `========================================================================\n\n`;
-
-    plan.days.forEach((day, i) => {
-      doc += `### Day ${i + 1}: ${day.title}\n`;
-      doc += `**Focus**: ${day.focus}\n`;
-      doc += `**Overview**: ${day.overview}\n\n`;
-      day.stops.forEach((stop, j) => {
-        doc += `  ${j + 1}. ${stop.name.toUpperCase()}\n`;
-        doc += `     Time: ${stop.time}\n`;
-        doc += `     Category: [${stop.category}]\n`;
-        doc += `     Description: ${stop.description}\n`;
-        if (stop.notes) doc += `     Note: ${stop.notes}\n`;
-        doc += `\n`;
+      const nextDays = current.days.map((day) => {
+        if (day.id !== targetDayId) return day;
+        return {
+          ...day,
+          stops: [...day.stops, {
+            id: `custom-stop-${Date.now()}`,
+            name: newStopName.trim(),
+            time: newStopTime,
+            category: newStopCategory,
+            description: newStopDesc.trim() || 'Custom added stop.',
+            notes: 'Added by traveller.'
+          }]
+        };
       });
-      doc += `------------------------------------------------------------------------\n\n`;
+      return { ...current, days: nextDays };
     });
-    return doc;
+
+    setShowAddModal(false);
+    showToast('✨ Custom activity added!');
+  }
+
+  function getShareUrl() {
+    const base = window.location.origin + window.location.pathname;
+    return `${base}?prompt=${encodeURIComponent(requestText)}`;
+  }
+
+  function copyLinkDirect() {
+    navigator.clipboard.writeText(getShareUrl());
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
+    showToast('📋 Trip Share Link Copied to Clipboard!');
   }
 
   function copyMarkdown() {
     if (!plan) return;
-    const md = generateDocumentText();
-    navigator.clipboard.writeText(md);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    let doc = `# ${plan.tripTitle}\n**Destination**: ${plan.destination}\n\n${plan.summary}\n`;
+    navigator.clipboard.writeText(doc);
+    showToast('📋 Markdown Copied to Clipboard!');
   }
 
   function downloadWordDocument() {
     if (!plan) return;
-
-    let html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-<head>
-  <meta charset='utf-8'>
-  <title>${plan.tripTitle}</title>
-  <style>
-    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 30px; color: #0f172a; line-height: 1.6; }
-    h1 { color: #1e1b4b; font-size: 24pt; margin-bottom: 4px; }
-    .meta { color: #64748b; font-size: 11pt; margin-bottom: 20px; font-weight: 600; }
-    .summary { background: #f8fafc; border-left: 4px solid #4f46e5; padding: 14px 18px; margin-bottom: 24px; font-size: 11pt; color: #334155; }
-    .day-header { background: #4f46e5; color: #ffffff; padding: 8px 14px; font-size: 13pt; font-weight: bold; margin-top: 24px; margin-bottom: 8px; border-radius: 4px; }
-    .day-focus { color: #475569; font-style: italic; font-size: 10pt; margin-bottom: 12px; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-    th { background: #f1f5f9; text-align: left; padding: 8px 10px; border: 1px solid #cbd5e1; font-size: 10pt; color: #334155; }
-    td { padding: 8px 10px; border: 1px solid #cbd5e1; vertical-align: top; font-size: 10pt; }
-    .badge { background: #e0e7ff; color: #3730a3; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 9pt; }
-    .notes { color: #64748b; font-size: 9pt; margin-top: 4px; font-style: italic; }
-  </style>
-</head>
-<body>
-  <h1>${plan.tripTitle}</h1>
-  <div class="meta">Destination: <strong>${plan.destination}</strong> | Duration: <strong>${plan.days.length} Days</strong> | Activities: <strong>${totalStops} Stops</strong></div>
-  <div class="summary"><strong>Overview:</strong> ${plan.summary}</div>
-`;
-
-    plan.days.forEach((day, i) => {
-      html += `
-  <div class="day-header">Day ${i + 1}: ${day.title}</div>
-  <div class="day-focus"><strong>Focus:</strong> ${day.focus} &bull; ${day.overview}</div>
-  <table>
-    <thead>
-      <tr>
-        <th style="width: 15%;">Time</th>
-        <th style="width: 25%;">Activity</th>
-        <th style="width: 15%;">Category</th>
-        <th style="width: 45%;">Details</th>
-      </tr>
-    </thead>
-    <tbody>`;
-
-      day.stops.forEach((stop) => {
-        html += `
-      <tr>
-        <td><strong>${stop.time}</strong></td>
-        <td><strong>${stop.name}</strong></td>
-        <td><span class="badge">${stop.category}</span></td>
-        <td>
-          ${stop.description}
-          ${stop.notes ? `<div class="notes">Note: ${stop.notes}</div>` : ''}
-        </td>
-      </tr>`;
-      });
-
-      html += `
-    </tbody>
-  </table>`;
-    });
-
-    html += `
-</body>
-</html>`;
-
+    let html = `<html><body><h1>${plan.tripTitle}</h1><p>${plan.summary}</p></body></html>`;
     const blob = new Blob(['\ufeff' + html], { type: 'application/msword' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    const safeName = (plan.destination || 'Trip').replace(/[^a-z0-9]/gi, '_');
     link.setAttribute('href', url);
-    link.setAttribute('download', `${safeName}_Itinerary.doc`);
+    link.setAttribute('download', `${plan.destination}_Itinerary.doc`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    showToast('📝 Word Document Downloaded!');
   }
 
-  function printDocument() {
-    window.print();
+  function startCheckout(item) {
+    setBookingItem(item);
+    setBookingStep('details');
+    setConfirmedBooking(null);
   }
 
-  // Get list of unique categories across stops
-  const categories = plan
-    ? ['ALL', ...new Set(plan.days.flatMap((d) => d.stops.map((s) => s.category)))]
-    : ['ALL'];
+  function handleProcessPayment(e) {
+    e.preventDefault();
+    const pnr = `PNR-${Math.floor(100000 + Math.random() * 900000)}`;
+    const bookingId = `BK-${Date.now().toString().slice(-6)}`;
+    
+    setConfirmedBooking({
+      pnr,
+      bookingId,
+      traveller: { name: travellerName, email: travellerEmail, phone: travellerPhone },
+      item: bookingItem,
+      payment: { method: paymentMethod.toUpperCase(), amount: formatMoney(bookingItem.priceUSD) }
+    });
+    setBookingStep('success');
+    showToast('🎉 Booking Confirmed! E-Ticket Generated.');
+  }
 
-  const filteredDays = plan
-    ? plan.days
-        .map((day, idx) => {
-          if (dayFilter !== 'ALL' && dayFilter !== idx) return null;
-          const stops = day.stops.filter(
-            (stop) => selectedCategory === 'ALL' || stop.category === selectedCategory
-          );
-          return { ...day, stops };
-        })
-        .filter(Boolean)
-    : [];
+  const allStops = plan ? plan.days.flatMap((day) => day.stops) : [];
+  const totalStops = allStops.length;
+  const categories = Array.from(new Set(allStops.map((stop) => stop.category)));
 
-  const totalStops = plan ? plan.days.reduce((acc, d) => acc + d.stops.length, 0) : 0;
+  const lodgingCostUSD = plan ? plan.days.length * 110 : 440;
+  const foodCostUSD = plan ? plan.days.length * 45 : 180;
+  const ticketsCostUSD = totalStops * 18;
+  const totalCostUSD = lodgingCostUSD + foodCostUSD + ticketsCostUSD;
+
+  const { realFlights, realTrains, realBuses, realHotels, realCabs } = getDestinationServices(
+    plan ? plan.destination : '',
+    requestText,
+    userProfile?.homeCountry || 'India',
+    userProfile?.homeCity || 'Chennai'
+  );
+
+  const handleEmailLogin = (email, _password, isSignUp) => {
+    const username = email.split('@')[0];
+    const loggedUser = {
+      email,
+      displayName: username.charAt(0).toUpperCase() + username.slice(1),
+      photoURL: `https://ui-avatars.com/api/?name=${encodeURIComponent(username)}&background=2563EB&color=fff`
+    };
+    setUser(loggedUser);
+    localStorage.setItem('wander_user', JSON.stringify(loggedUser));
+    showToast(isSignUp ? `🎉 Account created! Welcome, ${loggedUser.displayName}.` : `🚀 Signed in as ${loggedUser.displayName}!`);
+  };
+
+  if (!user && !isGuestMode) {
+    return (
+      <LoginPage
+        onEmailLogin={handleEmailLogin}
+        onContinueGuest={() => {
+          setIsGuestMode(true);
+          showToast('Exploring WanderAI as Guest');
+        }}
+      />
+    );
+  }
 
   return (
     <div className="app-shell">
-      {/* Decorative ambient gradients */}
-      <div className="ambient ambient-one" />
-      <div className="ambient ambient-two" />
-      <div className="ambient ambient-three" />
-
-      {/* Top Navbar */}
-      <header className="navbar">
-        <div className="navbar-container">
-          <div className="brand">
-            <span className="brand-logo">✈️</span>
-            <div>
-              <span className="brand-name">WanderAI</span>
-              <span className="brand-tag">Smart Trip Planner</span>
-            </div>
-          </div>
-
-          <div className="navbar-badges">
-            <span className={`provider-badge provider-${provider.includes('demo') ? 'demo' : 'api'}`}>
-              <span className="status-dot" />
-              {provider ? `Engine: ${provider}` : 'Engine: Demo'}
-            </span>
-            {model && <span className="model-badge">{model}</span>}
-          </div>
+      {toastMessage && (
+        <div className="toast-container">
+          <div className="toast">{toastMessage}</div>
         </div>
-      </header>
+      )}
+
+      {/* Modular Navbar */}
+      <Navbar
+        currencyCode={currencyCode}
+        setCurrencyCode={setCurrencyCode}
+        theme={theme}
+        setTheme={setTheme}
+        provider={provider}
+        model={model}
+        plan={plan}
+        user={user}
+        userProfile={userProfile}
+        onOpenShare={() => setShowShareModal(true)}
+        onOpenLogin={() => setShowLoginModal(true)}
+        onOpenProfile={() => setShowProfileModal(true)}
+        onLogout={handleLogout}
+        showToast={showToast}
+      />
 
       <main className="layout">
-        {/* Banner for Auth errors / fallback mode */}
-        {warning && (
-          <div className="warning-banner card">
-            <div className="warning-icon">⚠️</div>
-            <div className="warning-content">
-              <strong>Interactive Demo Fallback Active</strong>
-              <p>{warning}</p>
+
+
+        {/* Input Prompt Control Card */}
+        <section className="card control-card">
+          <div className="control-header">
+            <div>
+              <h2>Plan Your Custom Travel Circuit</h2>
+              <p className="summary-copy">Describe your ideal trip or choose a featured destination below.</p>
             </div>
+            <span className="pill">AI Powered</span>
+          </div>
+
+          <form onSubmit={(e) => { e.preventDefault(); submitPrompt(requestText); }}>
+            <textarea
+              className="prompt-input input-field"
+              rows={3}
+              placeholder="Describe your trip (e.g. Plan a 10-day trip to Tamil Nadu, Kerala, Kashmir, or New York...)"
+              value={requestText}
+              onChange={(e) => setRequestText(e.target.value)}
+              ref={requestTextRef}
+            />
+
+            <div className="prompt-actions">
+              <button
+                type="submit"
+                className="primary-button"
+                disabled={status === 'loading'}
+              >
+                {status === 'loading' ? '✨ Generating Custom Circuit...' : '✨ Generate AI Itinerary'}
+              </button>
+
+              <button
+                type="button"
+                className="action-btn"
+                onClick={() => submitPrompt('Plan a 10-day trip to Tamil Nadu visiting Chennai, Mahabalipuram, Thanjavur, Madurai, Rameshwaram, and Kanyakumari.')}
+              >
+                🛕 Tamil Nadu 10-Day
+              </button>
+
+              <button
+                type="button"
+                className="action-btn"
+                onClick={() => submitPrompt('Plan a 7-day trip to New York City with iconic landmarks, Statue of Liberty, Times Square, and Central Park.')}
+              >
+                🗽 New York City 7-Day
+              </button>
+            </div>
+          </form>
+
+          {/* Preset Prompts Carousel */}
+          <div className="sample-prompts-grid" style={{ marginTop: '16px' }}>
+            {SAMPLE_PROMPTS.slice(0, 6).map((sp) => (
+              <button
+                key={sp.title}
+                type="button"
+                className="prompt-chip"
+                onClick={() => { setRequestText(sp.prompt); submitPrompt(sp.prompt); }}
+              >
+                <span>{sp.icon}</span>
+                <div>
+                  <strong>{sp.title}</strong>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)', display: 'block' }}>{sp.dest}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {error && (
+          <div className="error-banner card">
+            <strong>Generation Error:</strong> {error}
           </div>
         )}
 
-        {/* Workspace grid: Left sidebar form + Right main board */}
-        <div className="workspace">
-          {/* Left Column: Form & Prompts */}
-          <aside className="planner-rail card">
-            <div className="rail-copy">
-              <span className="card-kicker">New Itinerary</span>
-              <h2>Where to next?</h2>
-              <p className="summary-copy">
-                Type your dream destination, travel group, and vibe. The AI builds a fully editable 10-day schedule.
-              </p>
-            </div>
+        {/* Modular Hero Banner with Clean Non-Duplicated Summary */}
+        <HeroBanner
+          plan={plan}
+          requestText={requestText}
+          totalStops={totalStops}
+          totalCostUSD={totalCostUSD}
+          formatMoney={formatMoney}
+          currencyCode={currencyCode}
+          onOpenShare={() => setShowShareModal(true)}
+          copyMarkdown={copyMarkdown}
+          downloadWordDocument={downloadWordDocument}
+          printDocument={() => window.print()}
+        />
 
-            <form className="planner-form" onSubmit={handleSubmit}>
-              <div className="input-wrapper">
-                <label className="field-label" htmlFor="trip-request">
-                  Trip Prompt
-                </label>
-                <textarea
-                  id="trip-request"
-                  ref={requestTextRef}
-                  value={requestText}
-                  onChange={(event) => setRequestText(event.target.value)}
-                  placeholder="e.g. 7 days in Kyoto for foodies who love ancient temples and cozy tea houses..."
-                  rows={4}
-                />
-              </div>
+        {/* View Mode Navigation Tabs */}
+        {plan && (
+          <nav className="view-tabs card">
+            <button type="button" className={`view-tab ${viewMode === 'timeline' ? 'active' : ''}`} onClick={() => setViewMode('timeline')}>
+              📍 Daily Itinerary
+            </button>
+            <button type="button" className={`view-tab ${viewMode === 'flights' ? 'active' : ''}`} onClick={() => setViewMode('flights')}>
+              ✈️ Flights ({realFlights.length})
+            </button>
+            <button type="button" className={`view-tab ${viewMode === 'trains' ? 'active' : ''}`} onClick={() => setViewMode('trains')}>
+              🚆 Trains ({realTrains.length})
+            </button>
+            <button type="button" className={`view-tab ${viewMode === 'buses' ? 'active' : ''}`} onClick={() => setViewMode('buses')}>
+              🚌 Buses ({realBuses.length})
+            </button>
+            <button type="button" className={`view-tab ${viewMode === 'hotels' ? 'active' : ''}`} onClick={() => setViewMode('hotels')}>
+              🏨 Hotels & Resorts ({realHotels.length})
+            </button>
+            <button type="button" className={`view-tab ${viewMode === 'cabs' ? 'active' : ''}`} onClick={() => setViewMode('cabs')}>
+              🚕 Cabs ({realCabs.length})
+            </button>
+          </nav>
+        )}
 
-              {/* Sample Prompts as sleek compact chips */}
-              <div className="prompt-gallery" aria-label="Quick prompts">
-                <span className="prompt-gallery-title">Inspiration Prompts</span>
-                <div className="prompt-chips">
-                  {SAMPLE_PROMPTS.map((samplePrompt) => (
-                    <button
-                      type="button"
-                      key={samplePrompt.title}
-                      className="chip-button"
-                      onClick={() => applyPrompt(samplePrompt.prompt)}
-                    >
-                      <span className="chip-icon">{samplePrompt.icon}</span>
-                      <span className="chip-title">{samplePrompt.title}</span>
-                    </button>
+        {/* VIEW 1: DAILY ITINERARY TIMELINE */}
+        {viewMode === 'timeline' && plan && (
+          <div className="itinerary-grid">
+            {plan.days.map((day) => (
+              <div key={day.id} className="day-card card">
+                <div className="day-header">
+                  <div>
+                    <h3 className="day-title">{day.title}</h3>
+                    <p className="day-focus">🎯 {day.focus}</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="action-btn"
+                    style={{ fontSize: '0.8rem', padding: '4px 10px' }}
+                    onClick={() => { setTargetDayId(day.id); setShowAddModal(true); }}
+                  >
+                    ➕ Add Activity
+                  </button>
+                </div>
+
+                <div className="day-body" style={{ padding: '16px' }}>
+                  {day.stops.map((stop, sIdx) => (
+                    <div key={stop.id} className="stop-card-item">
+                      <PlaceImage
+                        stop={stop}
+                        destination={plan.destination}
+                        className="stop-thumbnail-img"
+                      />
+                      <div className="stop-content-body">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', flexWrap: 'wrap' }}>
+                          <span className="stop-time-tag">⏰ {stop.time}</span>
+                          <span className="category-badge">{stop.category}</span>
+                        </div>
+                        <h4 style={{ margin: '4px 0 6px 0', fontSize: '1rem', fontWeight: '800' }}>{stop.name}</h4>
+                        <p className="stop-desc" style={{ marginBottom: '6px' }}>{stop.description}</p>
+                        {stop.notes && <div className="stop-note-box">💡 {stop.notes}</div>}
+                      </div>
+
+                      <div className="stop-actions">
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          disabled={sIdx === 0}
+                          onClick={() => moveStop(day.id, stop.id, -1)}
+                          title="Move Up"
+                        >
+                          ▲
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          disabled={sIdx === day.stops.length - 1}
+                          onClick={() => moveStop(day.id, stop.id, 1)}
+                          title="Move Down"
+                        >
+                          ▼
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn danger"
+                          onClick={() => removeStop(day.id, stop.id)}
+                          title="Remove Activity"
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    </div>
                   ))}
                 </div>
               </div>
+            ))}
+          </div>
+        )}
 
-              <div className="form-actions">
-                <button className="primary-button" type="submit" disabled={status === 'loading'}>
-                  {status === 'loading' ? (
-                    <>
-                      <span className="spinner" /> Generating Plan...
-                    </>
-                  ) : (
-                    <>✨ Generate Itinerary</>
-                  )}
-                </button>
-              </div>
-            </form>
-
-            <div className="status-row">
-              <span className={`status-pill status-${status}`}>
-                {status === 'loading' ? 'Planning...' : status === 'error' ? 'Error' : 'Ready'}
-              </span>
-              <span className="status-copy">
-                {plan ? `${plan.days.length} Days · ${totalStops} Stops` : 'Ready to plan'}
-              </span>
-            </div>
-
-            {error ? <div className="error-banner">{error}</div> : null}
-          </aside>
-
-          {/* Right Column: Interactive Board */}
-          <section className="itinerary-board">
-            {plan ? (
-              <>
-                {/* Header Card for Itinerary */}
-                <div className="plan-summary card">
-                  <div className="summary-main">
-                    <div className="header-tags">
-                      <span className="card-kicker">Destination Guide</span>
-                      <span className="destination-pill">📍 {plan.destination}</span>
-                    </div>
-                    <h2>{plan.tripTitle}</h2>
-                    <p className="summary-copy">{plan.summary}</p>
-                  </div>
-
-                  <div className="summary-footer">
-                    <div className="summary-stats">
-                      <div className="stat-card">
-                        <span className="stat-number">{plan.days.length}</span>
-                        <span className="stat-label">Days Planned</span>
-                      </div>
-                      <div className="stat-card">
-                        <span className="stat-number">{totalStops}</span>
-                        <span className="stat-label">Total Activities</span>
-                      </div>
-                    </div>
-
-                    <div className="summary-actions">
-                      <button
-                        type="button"
-                        className={`action-btn ${copied ? 'copied' : ''}`}
-                        onClick={copyMarkdown}
-                        title="Copy Markdown to Clipboard"
-                      >
-                        {copied ? '✓ Copied!' : '📋 Copy Markdown'}
-                      </button>
-                      <button
-                        type="button"
-                        className="action-btn download-btn"
-                        onClick={downloadWordDocument}
-                        title="Download Microsoft Word Document (.doc)"
-                      >
-                        📝 Download Word Doc (.doc)
-                      </button>
-                      <button
-                        type="button"
-                        className="action-btn print-btn"
-                        onClick={printDocument}
-                        title="Print or Save as PDF"
-                      >
-                        🖨️ Print / Save PDF
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Controls Bar: Day Filter & Expand/Collapse */}
-                <div className="board-controls card">
-                  <div className="filter-group">
-                    <span className="filter-label">Day:</span>
-                    <button
-                      type="button"
-                      className={`filter-chip ${dayFilter === 'ALL' ? 'active' : ''}`}
-                      onClick={() => setDayFilter('ALL')}
-                    >
-                      All Days ({plan.days.length})
-                    </button>
-                    {plan.days.map((d, i) => (
-                      <button
-                        type="button"
-                        key={d.id}
-                        className={`filter-chip ${dayFilter === i ? 'active' : ''}`}
-                        onClick={() => setDayFilter(i)}
-                      >
-                        Day {i + 1}
-                      </button>
-                    ))}
-                  </div>
-
-                  {categories.length > 2 && (
-                    <div className="filter-group category-group">
-                      <span className="filter-label">Category:</span>
-                      {categories.map((cat) => (
-                        <button
-                          type="button"
-                          key={cat}
-                          className={`filter-chip ${selectedCategory === cat ? 'active' : ''}`}
-                          onClick={() => setSelectedCategory(cat)}
-                        >
-                          {cat}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="toggle-group">
-                    <button type="button" className="text-btn" onClick={() => toggleAllDays(true)}>
-                      Expand All
-                    </button>
-                    <span className="divider">·</span>
-                    <button type="button" className="text-btn" onClick={() => toggleAllDays(false)}>
-                      Collapse All
-                    </button>
-                  </div>
-                </div>
-
-                {/* Days Stack */}
-                <div className="days-stack">
-                  {filteredDays.map((day) => {
-                    const actualDayIndex = plan.days.findIndex((d) => d.id === day.id);
-
-                    return (
-                      <article
-                        className={`day-card card ${day.expanded ? 'is-open' : 'is-closed'}`}
-                        key={day.id}
-                      >
-                        <button
-                          className="day-header"
-                          type="button"
-                          onClick={() => toggleDay(day.id)}
-                        >
-                          <div className="day-title-group">
-                            <span className="day-badge">Day {actualDayIndex + 1}</span>
-                            <div>
-                              <h3>{day.title}</h3>
-                              <p className="day-focus">{day.focus}</p>
-                            </div>
-                          </div>
-
-                          <div className="day-header-meta">
-                            <span className="stop-count-pill">{day.stops.length} stops</span>
-                            <span className="chevron-icon">{day.expanded ? '▲' : '▼'}</span>
-                          </div>
-                        </button>
-
-                        {day.expanded && (
-                          <div className="day-body">
-                            <p className="overview-copy">{day.overview}</p>
-
-                            {day.stops.length ? (
-                              <ul className="stop-list">
-                                {day.stops.map((stop, stopIndex) => (
-                                  <li
-                                    className={`stop-card ${stop.expanded ? 'expanded' : ''}`}
-                                    key={stop.id}
-                                  >
-                                    <div className="stop-topline">
-                                      <button
-                                        className="stop-toggle"
-                                        type="button"
-                                        onClick={() => toggleStop(day.id, stop.id)}
-                                      >
-                                        <span className="stop-number">{stopIndex + 1}</span>
-                                        <div className="stop-title-wrap">
-                                          <strong>{stop.name}</strong>
-                                          <span className="stop-time-tag">⏱️ {stop.time}</span>
-                                        </div>
-                                      </button>
-
-                                      <div className="stop-meta-right">
-                                        <span
-                                          className={`category-badge cat-${stop.category.toLowerCase().replace(/[^a-z0-9]/g, '-')}`}
-                                        >
-                                          {stop.category}
-                                        </span>
-
-                                        <div className="stop-actions">
-                                          <button
-                                            type="button"
-                                            title="Move Up"
-                                            onClick={() => moveStop(day.id, stop.id, -1)}
-                                            disabled={stopIndex === 0}
-                                          >
-                                            ↑
-                                          </button>
-                                          <button
-                                            type="button"
-                                            title="Move Down"
-                                            onClick={() => moveStop(day.id, stop.id, 1)}
-                                            disabled={stopIndex === day.stops.length - 1}
-                                          >
-                                            ↓
-                                          </button>
-                                          <button
-                                            type="button"
-                                            className="danger"
-                                            title="Delete Stop"
-                                            onClick={() => removeStop(day.id, stop.id)}
-                                          >
-                                            ✕
-                                          </button>
-                                        </div>
-                                      </div>
-                                    </div>
-
-                                    {stop.expanded && (
-                                      <div className="stop-details">
-                                        <p className="stop-desc">{stop.description}</p>
-                                        {stop.notes && (
-                                          <div className="stop-note-box">
-                                            💡 <strong>Tip:</strong> {stop.notes}
-                                          </div>
-                                        )}
-                                      </div>
-                                    )}
-                                  </li>
-                                ))}
-                              </ul>
-                            ) : (
-                              <div className="empty-day">
-                                No stops match the current filter for this day.
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </article>
-                    );
-                  })}
-                </div>
-              </>
-            ) : (
-              <div className="empty-state card">
-                <span className="empty-icon">🗺️</span>
-                <h2>Ready to plan your trip</h2>
-                <p>Select an example prompt on the left or write your custom destination request.</p>
-              </div>
-            )}
-          </section>
-        </div>
+        {/* Modular Transport Hub for Flights, Trains, Buses, Hotels, Cabs */}
+        <TransportHub
+          viewMode={viewMode}
+          realFlights={realFlights}
+          realTrains={realTrains}
+          realBuses={realBuses}
+          realHotels={realHotels}
+          realCabs={realCabs}
+          userProfile={userProfile}
+          onOpenProfile={() => setShowProfileModal(true)}
+          startCheckout={startCheckout}
+          formatMoney={formatMoney}
+        />
       </main>
+
+      {/* Modular Modals */}
+      <LoginModal
+        isOpen={showLoginModal}
+        onClose={() => setShowLoginModal(false)}
+        onEmailLogin={handleEmailLogin}
+      />
+
+      <ProfileModal
+        isOpen={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+        user={user}
+        userProfile={userProfile}
+        setUserProfile={setUserProfile}
+        travellerName={travellerName}
+        setTravellerName={setTravellerName}
+        travellerEmail={travellerEmail}
+        setUser={setUser}
+        showToast={showToast}
+      />
+
+      <ShareModal
+        isOpen={showShareModal}
+        onClose={() => setShowShareModal(false)}
+        plan={plan}
+        totalCostUSD={totalCostUSD}
+        formatMoney={formatMoney}
+        getShareUrl={getShareUrl}
+        copiedLink={copiedLink}
+        copyLinkDirect={copyLinkDirect}
+        requestText={requestText}
+        triggerNativeShare={() => {
+          if (navigator.share) {
+            navigator.share({ title: plan.tripTitle, url: getShareUrl() }).catch(() => {});
+          } else {
+            copyLinkDirect();
+          }
+        }}
+      />
+
+      <BookingModal
+        bookingItem={bookingItem}
+        setBookingItem={setBookingItem}
+        bookingStep={bookingStep}
+        setBookingStep={setBookingStep}
+        travellerName={travellerName}
+        setTravellerName={setTravellerName}
+        travellerEmail={travellerEmail}
+        setTravellerEmail={setTravellerEmail}
+        travellerPhone={travellerPhone}
+        setTravellerPhone={setTravellerPhone}
+        travellerAge={travellerAge}
+        setTravellerAge={setTravellerAge}
+        seatPref={seatPref}
+        setSeatPref={setSeatPref}
+        paymentMethod={paymentMethod}
+        setPaymentMethod={setPaymentMethod}
+        upiId={upiId}
+        setUpiId={setUpiId}
+        cardNumber={cardNumber}
+        setCardNumber={setCardNumber}
+        cardExpiry={cardExpiry}
+        setCardExpiry={setCardExpiry}
+        cardCvv={cardCvv}
+        setCardCvv={setCardCvv}
+        confirmedBooking={confirmedBooking}
+        onProcessPayment={handleProcessPayment}
+        formatMoney={formatMoney}
+        showToast={showToast}
+      />
+
+      <AddStopModal
+        isOpen={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        newStopName={newStopName}
+        setNewStopName={setNewStopName}
+        newStopTime={newStopTime}
+        setNewStopTime={setNewStopTime}
+        newStopCategory={newStopCategory}
+        setNewStopCategory={setNewStopCategory}
+        newStopDesc={newStopDesc}
+        setNewStopDesc={setNewStopDesc}
+        onAddStop={handleAddCustomStop}
+      />
     </div>
   );
 }

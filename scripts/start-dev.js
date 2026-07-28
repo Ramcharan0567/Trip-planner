@@ -1,7 +1,7 @@
 import net from 'node:net';
 import { spawn } from 'node:child_process';
 
-const apiPort = Number(process.env.PORT || 3001);
+const apiPort = Number(process.env.PORT || 3006);
 const host = process.env.HOST || '127.0.0.1';
 
 const apiPortState = await checkPort(apiPort, host);
