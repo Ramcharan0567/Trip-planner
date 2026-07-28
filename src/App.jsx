@@ -408,7 +408,7 @@ export default function App() {
               <>
                 {/* Header Card for Itinerary */}
                 <div className="plan-summary card">
-                  <div className="summary-left">
+                  <div className="summary-main">
                     <div className="header-tags">
                       <span className="card-kicker">Destination Guide</span>
                       <span className="destination-pill">📍 {plan.destination}</span>
@@ -417,17 +417,19 @@ export default function App() {
                     <p className="summary-copy">{plan.summary}</p>
                   </div>
 
-                  <div className="summary-actions-grid">
-                    <div className="stat-card">
-                      <span className="stat-number">{plan.days.length}</span>
-                      <span className="stat-label">Days Planned</span>
-                    </div>
-                    <div className="stat-card">
-                      <span className="stat-number">{totalStops}</span>
-                      <span className="stat-label">Total Activities</span>
+                  <div className="summary-footer">
+                    <div className="summary-stats">
+                      <div className="stat-card">
+                        <span className="stat-number">{plan.days.length}</span>
+                        <span className="stat-label">Days Planned</span>
+                      </div>
+                      <div className="stat-card">
+                        <span className="stat-number">{totalStops}</span>
+                        <span className="stat-label">Total Activities</span>
+                      </div>
                     </div>
 
-                    <div className="action-buttons-stack">
+                    <div className="summary-actions">
                       <button
                         type="button"
                         className={`action-btn ${copied ? 'copied' : ''}`}
