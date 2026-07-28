@@ -219,19 +219,58 @@ export default function App() {
     });
   }
 
+  function generateDocumentText() {
+    if (!plan) return '';
+    let doc = `# ${plan.tripTitle}\n`;
+    doc += `**Destination**: ${plan.destination}\n`;
+    doc += `**Duration**: ${plan.days.length} Days (${totalStops} Activities)\n`;
+    doc += `**Summary**: ${plan.summary}\n\n`;
+    doc += `========================================================================\n`;
+    doc += `                            TRIP ITINERARY DOCUMENT                     \n`;
+    doc += `========================================================================\n\n`;
+
+    plan.days.forEach((day, i) => {
+      doc += `### Day ${i + 1}: ${day.title}\n`;
+      doc += `**Focus**: ${day.focus}\n`;
+      doc += `**Overview**: ${day.overview}\n\n`;
+      day.stops.forEach((stop, j) => {
+        doc += `  ${j + 1}. ${stop.name.toUpperCase()}\n`;
+        doc += `     Time: ${stop.time}\n`;
+        doc += `     Category: [${stop.category}]\n`;
+        doc += `     Description: ${stop.description}\n`;
+        if (stop.notes) doc += `     Note: ${stop.notes}\n`;
+        doc += `\n`;
+      });
+      doc += `------------------------------------------------------------------------\n\n`;
+    });
+    return doc;
+  }
+
   function copyMarkdown() {
     if (!plan) return;
-    let md = `# ${plan.tripTitle}\n**Destination**: ${plan.destination}\n\n${plan.summary}\n\n`;
-    plan.days.forEach((day, i) => {
-      md += `## Day ${i + 1}: ${day.title}\n*Focus*: ${day.focus}\n${day.overview}\n\n`;
-      day.stops.forEach((stop, j) => {
-        md += `${j + 1}. **${stop.name}** (${stop.time}) [${stop.category}]\n   ${stop.description}\n   *Note*: ${stop.notes}\n`;
-      });
-      md += `\n`;
-    });
+    const md = generateDocumentText();
     navigator.clipboard.writeText(md);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  }
+
+  function downloadDocument() {
+    if (!plan) return;
+    const content = generateDocumentText();
+    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const safeName = (plan.destination || 'Trip').replace(/[^a-z0-9]/gi, '_');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `${safeName}_Itinerary_Doc.md`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  function printDocument() {
+    window.print();
   }
 
   // Get list of unique categories across stops
@@ -388,13 +427,32 @@ export default function App() {
                       <span className="stat-label">Total Activities</span>
                     </div>
 
-                    <button
-                      type="button"
-                      className={`action-btn ${copied ? 'copied' : ''}`}
-                      onClick={copyMarkdown}
-                    >
-                      {copied ? '✓ Copied!' : '📋 Copy Markdown'}
-                    </button>
+                    <div className="action-buttons-stack">
+                      <button
+                        type="button"
+                        className={`action-btn ${copied ? 'copied' : ''}`}
+                        onClick={copyMarkdown}
+                        title="Copy Markdown to Clipboard"
+                      >
+                        {copied ? '✓ Copied!' : '📋 Copy Markdown'}
+                      </button>
+                      <button
+                        type="button"
+                        className="action-btn download-btn"
+                        onClick={downloadDocument}
+                        title="Download as Document File (.md)"
+                      >
+                        📄 Download Document
+                      </button>
+                      <button
+                        type="button"
+                        className="action-btn print-btn"
+                        onClick={printDocument}
+                        title="Print or Save as PDF"
+                      >
+                        🖨️ Print / Save PDF
+                      </button>
+                    </div>
                   </div>
                 </div>
 
