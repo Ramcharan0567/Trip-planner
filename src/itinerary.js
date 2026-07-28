@@ -145,7 +145,7 @@ export function inferDayCount(requestText) {
   const match = requestText.match(/(\d+)\s*[- ]?day/i);
   if (match) {
     const num = parseInt(match[1], 10);
-    if (num > 0 && num <= 14) return num;
+    if (num > 0 && num <= 30) return num;
   }
   return 4;
 }
