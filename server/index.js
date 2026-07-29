@@ -1,11 +1,16 @@
 import dotenv from 'dotenv';
 import express from 'express';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { buildDemoItinerary, inferDayCount, normalizeItinerary } from '../src/itinerary.js';
 
 dotenv.config();
 
 const app = express();
 const port = Number(process.env.PORT || 3006);
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 function getActiveProvider() {
   dotenv.config({ override: true });
@@ -27,6 +32,7 @@ function getActiveProvider() {
 }
 
 app.use(express.json({ limit: '1mb' }));
+app.use(express.static(path.join(__dirname, '../dist')));
 
 app.get('/api/health', (_request, response) => {
   const provider = getActiveProvider();
@@ -180,6 +186,11 @@ app.post('/api/itinerary', async (request, response) => {
       itinerary: fallbackItinerary
     });
   }
+});
+
+// Serve React App index.html for all other routes
+app.get('*', (request, response) => {
+  response.sendFile(path.join(__dirname, '../dist/index.html'));
 });
 
 app.listen(port, () => {
