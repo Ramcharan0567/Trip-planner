@@ -494,3 +494,5 @@ function repairTruncatedJson(str) {
 
   return cleaned;
 }
+
+export default app;
