@@ -468,20 +468,64 @@ export function getDestinationServices(destName = '', promptText = '', homeCount
     };
   }
 
-  // DYNAMIC FALLBACK FOR ANY PROMPT STATE OR CITY
-  let rawName = destName && destName !== 'Destination' ? destName : promptText || 'Destination';
-  rawName = rawName.replace(/trip|itinerary|tour|vacation|plan|days|day|\d+/gi, '').trim();
-  const dName = rawName ? rawName.charAt(0).toUpperCase() + rawName.slice(1) : 'Destination';
+function extractCleanDestination(destName, promptText) {
+  if (destName && typeof destName === 'string' && destName.trim() && destName !== 'Destination' && destName !== 'Your Destination') {
+    return destName.trim();
+  }
+  if (!promptText || typeof promptText !== 'string') return 'Destination';
+
+  const text = promptText.trim();
+
+  // Match "to <Location>"
+  const toMatch = text.match(/\bto\s+([A-Za-z\s,'-]+?)(?:\bfor\b|\bwith\b|\bin\b|\bnext\b|\bthis\b|\bfrom\b|\bvisiting\b|\band\b|[.,;!$]|$)/i);
+  if (toMatch?.[1]?.trim()) {
+    const res = toMatch[1].replace(/\b(trip|itinerary|vacation|tour|plan|days|day)\b/gi, '').trim();
+    if (res.length > 1) return res.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+  }
+
+  // Match "in <Location>"
+  const inMatch = text.match(/\bin\s+([A-Za-z\s,'-]+?)(?:\bfor\b|\bwith\b|\bnext\b|\bthis\b|\bfrom\b|\bvisiting\b|\band\b|[.,;!$]|$)/i);
+  if (inMatch?.[1]?.trim()) {
+    const res = inMatch[1].replace(/\b(trip|itinerary|vacation|tour|plan|days|day)\b/gi, '').trim();
+    if (res.length > 1) return res.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+  }
+
+  // Match "visit <Location>"
+  const visitMatch = text.match(/\bvisit\s+([A-Za-z\s,'-]+?)(?:[.,;!$]|\s+with\b|\s+for\b|\s+in\b|\s+next\b|$)/i);
+  if (visitMatch?.[1]?.trim()) {
+    const res = visitMatch[1].replace(/\b(trip|itinerary|vacation|tour|plan|days|day)\b/gi, '').trim();
+    if (res.length > 1) return res.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+  }
+
+  // Clean stop words
+  const clean = text
+    .replace(/^\d+[- ]*day\s*/i, '')
+    .replace(/\b(a|an|the|trip|itinerary|vacation|tour|plan|for|days|day|with|family|solo|couple|group|best|top|places|to|visit|in)\b/gi, '')
+    .trim();
+
+  const words = clean.split(/\s+/).filter(w => w.length > 2);
+  if (words.length > 0) {
+    return words.slice(0, 2).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+  }
+
+  return 'Destination';
+}
+
+  // DYNAMIC FALLBACK FOR ANY PROMPT STATE, CITY OR COUNTRY
+  const dName = extractCleanDestination(destName, promptText);
+  const isInternationalPrompt = 
+    /paris|london|tokyo|japan|france|italy|rome|sydney|australia|dubai|uae|singapore|bali|indonesia|thailand|bangkok|phuket|new york|usa|america|switzerland|hawaii|egypt|cairo|maldives|greece|spain|barcelona/i.test(dName) ||
+    (!isHomeIndia && !/india|gujarat|goa|kerala|mumbai|delhi|jaipur|rajasthan|chennai|bangalore/i.test(dName));
 
   return {
     realFlights: isHomeIndia ? [
-      { title: `IndiGo Express 6E-408 (${dName})`, carrier: 'IndiGo Airlines', type: 'Flight', code: '6E-408', time: '06:15 AM ➔ 08:30 AM', duration: '2h 15m', priceUSD: 62, bag: '15kg Included', class: 'Economy Standard', originDest: `${hCity} ➔ ${dName}` },
-      { title: `Air India Direct AI-802`, carrier: 'Air India', type: 'Flight', code: 'AI-802', time: '10:40 AM ➔ 01:10 PM', duration: '2h 30m', priceUSD: 78, bag: '25kg Included', class: 'Economy Flex', originDest: `DEL ➔ ${dName}` }
+      { title: `IndiGo Express 6E-408 (${dName})`, carrier: 'IndiGo Airlines', type: 'Flight', code: '6E-408', time: '06:15 AM ➔ 08:30 AM', duration: '2h 15m', priceUSD: isInternationalPrompt ? 320 : 62, bag: '15kg Included', class: 'Economy Standard', originDest: `${hCity} ➔ ${dName}` },
+      { title: `Air India Direct AI-802`, carrier: 'Air India', type: 'Flight', code: 'AI-802', time: '10:40 AM ➔ 01:10 PM', duration: '2h 30m', priceUSD: isInternationalPrompt ? 410 : 78, bag: '25kg Included', class: 'Economy Flex', originDest: `DEL ➔ ${dName}` }
     ] : [
       { title: `Global Express DL-204`, carrier: 'Delta Air Lines', type: 'Flight', code: 'DL-204', time: '06:15 AM ➔ 08:30 AM', duration: '2h 15m', priceUSD: 185, bag: '23kg Included', class: 'Economy Standard', originDest: `${hCity} (${hCountry}) ➔ ${dName}` },
       { title: `United Airlines UA-542`, carrier: 'United Airlines', type: 'Flight', code: 'UA-542', time: '10:40 AM ➔ 01:10 PM', duration: '2h 30m', priceUSD: 210, bag: '23kg Included', class: 'Economy Flex', originDest: `${hCountry} ➔ ${dName}` }
     ],
-    realTrains: isHomeIndia ? [
+    realTrains: isHomeIndia && !isInternationalPrompt ? [
       { title: `${dName} Vande Bharat Express #20608`, carrier: 'Indian Railways Vande Bharat', type: 'Train', code: '20608', time: '05:50 AM ➔ 11:30 AM', duration: '5h 40m', priceUSD: 22, seats: '42 Available', class: 'AC Executive Chair Car (EC)' },
       { title: `${dName} Superfast Express #12432`, carrier: 'Indian Railways', type: 'Train', code: '12432', time: '04:30 PM ➔ 06:15 AM (+1)', duration: '13h 45m', priceUSD: 15, seats: '38 Available', class: '2nd AC Tier (2A)' }
     ] : [
@@ -490,7 +534,12 @@ export function getDestinationServices(destName = '', promptText = '', homeCount
     realBuses: [
       { title: `${dName} IntrCity SmartBus AC Volvo`, carrier: 'IntrCity SmartBus', type: 'Bus', code: 'SB-804', time: '10:30 PM ➔ 06:00 AM (+1)', duration: '7h 30m', priceUSD: 14, seats: '14 Sleepers Available', class: 'AC Sleeper 2+1' }
     ],
-    realHotels: [
+    realHotels: isInternationalPrompt ? [
+      { title: `The Grand Ritz & Palace ${dName}`, rating: '⭐ 4.9 (3,480 reviews)', loc: `Central Promenade & Historic District · ${dName}`, priceUSD: 380, img: 'https://images.unsplash.com/photo-1566073771259-6a8506099945', tags: ['Iconic City View', 'Michelin-Star Dining', 'Luxury Spa & Wellness'] },
+      { title: `Radisson Blu Luxury Suites ${dName}`, rating: '⭐ 4.8 (2,150 reviews)', loc: `Downtown Financial Hub · ${dName}`, priceUSD: 240, img: 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b', tags: ['Executive Club Lounge', 'Free Breakfast & WiFi', 'Rooftop Bar'] },
+      { title: `The Boutique Eco-Lodge & Spa ${dName}`, rating: '⭐ 4.7 (1,680 reviews)', loc: `Arts & Heritage Quarter · ${dName}`, priceUSD: 160, img: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e', tags: ['Boutique Atmosphere', 'Artisanal Cafe', 'Walking Tour Access'] },
+      { title: `Marriott Courtyard Hotel ${dName}`, rating: '⭐ 4.8 (1,950 reviews)', loc: `Landmark Zone · ${dName}`, priceUSD: 190, img: 'https://images.unsplash.com/photo-1542314831-068cd1dbfeeb', tags: ['Central Location', 'Outdoor Pool', '24/7 Fitness Center'] }
+    ] : [
       { title: `Taj Palace & Heritage Resort ${dName}`, rating: '⭐ 4.9 (2,480 reviews)', loc: `City Promenade & Heritage Precinct · ${dName}`, priceUSD: 175, img: 'https://images.unsplash.com/photo-1566073771259-6a8506099945', tags: ['5-Star Heritage Luxury', 'Rooftop Infinity Pool', 'Fine Dining Restaurant'] },
       { title: `Radisson Blu Luxury Suites ${dName}`, rating: '⭐ 4.8 (1,850 reviews)', loc: `Financial & Business District · ${dName}`, priceUSD: 135, img: 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b', tags: ['Executive Club Lounge', 'Free Breakfast & WiFi', 'Luxury Spa'] },
       { title: `The Fern Eco-Resort & Spa ${dName}`, rating: '⭐ 4.7 (1,340 reviews)', loc: `Scenic Nature Belt · ${dName}`, priceUSD: 95, img: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e', tags: ['Eco-Friendly Retreat', 'Organic Garden Dining', 'Local Sightseeing Desk'] },
